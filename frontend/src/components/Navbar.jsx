@@ -1,9 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Bus, Search, User, ListOrdered } from 'lucide-react';
+import { Bus, Search, User, ListOrdered, Menu, X, LogOut, LogIn, UserPlus } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 function Navbar() {
   const location = useLocation();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const isAuthenticated = !!localStorage.getItem('token');
 
   const navItems = [
     { label: 'Home', path: '/', icon: <Bus className="w-5 h-5" /> },
@@ -48,22 +51,78 @@ function Navbar() {
           })}
         </div>
 
-        <div className="flex gap-4 items-center">
-            {localStorage.getItem('token') ? (
+        {/* Desktop Search & Auth Metrics */}
+        <div className="hidden md:flex gap-4 items-center">
+            {isAuthenticated ? (
                 <button 
                     onClick={handleLogout}
-                    className="text-sm font-bold bg-lavender/10 text-lavender border border-lavender/30 px-5 py-2 rounded-lg hover:bg-lavender hover:text-black hover:shadow-[0_0_15px_rgba(150,123,182,0.5)] transition-all"
+                    className="text-sm font-bold bg-lavender/10 text-lavender border border-lavender/30 px-5 py-2 rounded-lg hover:bg-lavender hover:text-black hover:shadow-[0_0_15px_rgba(150,123,182,0.5)] transition-all flex items-center gap-2"
                 >
-                    Logout
+                    <LogOut className="w-4 h-4" /> Logout
                 </button>
             ) : (
                 <>
-                    <Link to="/login" className="text-sm font-bold text-gray-300 hover:text-lavender transition-all">Login</Link>
-                    <Link to="/signup" className="text-sm font-bold bg-lavender/10 text-lavender border border-lavender/30 px-5 py-2 rounded-lg hover:bg-lavender hover:text-black hover:shadow-[0_0_15px_rgba(150,123,182,0.5)] transition-all">Sign Up</Link>
+                    <Link to="/login" className="text-sm font-bold text-gray-300 hover:text-lavender transition-all flex items-center gap-2"><LogIn className="w-4 h-4"/> Login</Link>
+                    <Link to="/signup" className="text-sm font-bold bg-lavender/10 text-lavender border border-lavender/30 px-5 py-2 rounded-lg hover:bg-lavender hover:text-black hover:shadow-[0_0_15px_rgba(150,123,182,0.5)] transition-all flex items-center gap-2"><UserPlus className="w-4 h-4" /> Sign Up</Link>
                 </>
             )}
         </div>
+
+        {/* Mobile Hamburger Toggle */}
+        <button 
+          className="md:hidden text-lavender p-2 drop-shadow-md"
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+        >
+          {isMobileMenuOpen ? <X className="w-7 h-7" /> : <Menu className="w-7 h-7" />}
+        </button>
       </div>
+
+      {/* Mobile Animated Dropdown */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="md:hidden bg-[#0a0a0f]/95 backdrop-blur-3xl border-b border-lavender/20 shadow-[-0_20px_40px_rgba(0,0,0,0.8)] overflow-hidden"
+          >
+            <div className="flex flex-col px-6 py-6 pb-8 gap-6">
+              <div className="flex flex-col gap-4 border-b border-white/5 pb-6">
+                {navItems.map(item => {
+                  const isActive = location.pathname === item.path;
+                  return (
+                    <Link 
+                      key={item.path} 
+                      to={item.path}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 text-lg font-bold transition-all px-4 py-3 rounded-2xl ${isActive ? 'bg-lavender/10 text-lavender-light border border-lavender/20 shadow-inner' : 'text-gray-400 hover:bg-white/5 hover:text-lavender'}`}
+                    >
+                      {item.icon}
+                      {item.label}
+                    </Link>
+                  )
+                })}
+              </div>
+
+              <div className="flex flex-col gap-4">
+                {isAuthenticated ? (
+                  <button 
+                      onClick={() => { setIsMobileMenuOpen(false); handleLogout(); }}
+                      className="text-lg font-bold bg-red-500/10 text-red-400 border border-red-500/30 px-6 py-3 rounded-2xl flex items-center justify-center gap-3 w-full"
+                  >
+                      <LogOut className="w-5 h-5" /> Logout
+                  </button>
+                ) : (
+                  <>
+                      <Link to="/login" onClick={() => setIsMobileMenuOpen(false)} className="text-lg font-bold text-center text-gray-300 bg-white/5 border border-white/10 px-6 py-3 rounded-2xl hover:text-lavender transition-all">Login</Link>
+                      <Link to="/signup" onClick={() => setIsMobileMenuOpen(false)} className="text-lg font-bold text-center bg-gradient-to-r from-purple-600 to-lavender text-white px-6 py-3 rounded-2xl shadow-[0_0_20px_rgba(150,123,182,0.4)] transition-all">Create Account</Link>
+                  </>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </nav>
   );
 }
