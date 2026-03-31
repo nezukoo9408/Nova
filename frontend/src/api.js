@@ -1,7 +1,10 @@
 import axios from 'axios';
 
+// Vite strictly requires import.meta.env and the VITE_ prefix.
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 const api = axios.create({
-    baseURL: 'http://localhost:8000/api',
+    baseURL: `${API_URL}/api`,
 });
 
 api.interceptors.request.use((config) => {
