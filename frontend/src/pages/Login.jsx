@@ -10,9 +10,12 @@ function Login() {
   
   const [formData, setFormData] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    setIsLoading(true);
+    setError('');
     try {
       const res = await api.post('/auth/login', formData);
       
@@ -22,6 +25,8 @@ function Login() {
     } catch (error) {
         console.error("Login failed", error);
         setError(error.response?.data?.detail || "Invalid credentials");
+    } finally {
+        setIsLoading(false);
     }
   };
 
@@ -60,8 +65,8 @@ function Login() {
                 className="w-full bg-[#1a1a1a] border border-lavender/20 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-lavender transition-all"
             />
             
-            <button type="submit" className="w-full bg-gradient-to-r from-lavender-dark to-lavender text-black font-bold py-4 rounded-xl hover:shadow-[0_0_20px_rgba(150,123,182,0.6)] transition-all mt-4">
-                Login
+            <button type="submit" disabled={isLoading} className={`w-full bg-gradient-to-r from-lavender-dark to-lavender text-black font-bold py-4 rounded-xl transition-all mt-4 ${isLoading ? 'opacity-70 cursor-not-allowed' : 'hover:shadow-[0_0_20px_rgba(150,123,182,0.6)]'}`}>
+                {isLoading ? 'Connecting to server...' : 'Login'}
             </button>
         </form>
         

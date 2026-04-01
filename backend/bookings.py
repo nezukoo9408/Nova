@@ -4,6 +4,7 @@ from database import get_db
 import models, schemas
 from redis_store import client as redis_client
 from datetime import datetime, timedelta
+from auth import get_current_user
 
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 
@@ -34,7 +35,7 @@ def lock_seat(req: schemas.SeatLockRequest, db: Session = Depends(get_db)):
     return {"message": "Seat locked successfully for 5 minutes."}
 
 @router.post("/confirm")
-def confirm_booking(req: schemas.BookingRequest, user_id: int = 1, db: Session = Depends(get_db)):
+def confirm_booking(req: schemas.BookingRequest, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     # In real app, user_id comes from Depends(get_current_user)
     key = f"locked_seat:{req.bus_id}:{req.travel_date}:{req.seat_id}"
     
@@ -51,7 +52,7 @@ def confirm_booking(req: schemas.BookingRequest, user_id: int = 1, db: Session =
         
     # Create booking
     booking = models.Booking(
-        user_id=user_id,
+        user_id=current_user.id,
         bus_id=req.bus_id,
         seat_id=req.seat_id,
         travel_date=req.travel_date,
@@ -70,8 +71,8 @@ def confirm_booking(req: schemas.BookingRequest, user_id: int = 1, db: Session =
     return {"message": "Booking confirmed successfully", "booking_id": booking.id}
 
 @router.post("/{booking_id}/cancel")
-def cancel_booking(booking_id: int, db: Session = Depends(get_db)):
-    booking = db.query(models.Booking).filter(models.Booking.id == booking_id).first()
+def cancel_booking(booking_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    booking = db.query(models.Booking).filter(models.Booking.id == booking_id, models.Booking.user_id == current_user.id).first()
     if not booking or booking.status != "booked":
         raise HTTPException(status_code=400, detail="Invalid booking")
         
@@ -126,11 +127,11 @@ def cancel_booking(booking_id: int, db: Session = Depends(get_db)):
     return {"message": "Booking cancelled", "auto_assigned": assigned_to_waitlist}
 
 @router.post("/waitlist")
-def join_waitlist(req: schemas.BookingRequest, user_id: int = 1, db: Session = Depends(get_db)):
+def join_waitlist(req: schemas.BookingRequest, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     existing = db.query(models.WaitingList).filter(
         models.WaitingList.bus_id == req.bus_id,
         models.WaitingList.travel_date == req.travel_date,
-        models.WaitingList.user_id == user_id,
+        models.WaitingList.user_id == current_user.id,
         models.WaitingList.status == "waiting"
     ).first()
     if existing:
@@ -146,7 +147,7 @@ def join_waitlist(req: schemas.BookingRequest, user_id: int = 1, db: Session = D
         raise HTTPException(status_code=400, detail="Waitlist is full (max 2).")
         
     wl_entry = models.WaitingList(
-        user_id=user_id,
+        user_id=current_user.id,
         bus_id=req.bus_id,
         position=waitlist_count + 1,
         status="waiting",
@@ -160,10 +161,10 @@ def join_waitlist(req: schemas.BookingRequest, user_id: int = 1, db: Session = D
     return {"message": "Joined waitlist successfully", "waiting_id": wl_entry.id}
 
 @router.post("/waitlist/{waitlist_id}/cancel")
-def cancel_waitlist(waitlist_id: int, user_id: int = 1, db: Session = Depends(get_db)):
+def cancel_waitlist(waitlist_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     waitlist_entry = db.query(models.WaitingList).filter(
         models.WaitingList.id == waitlist_id,
-        models.WaitingList.user_id == user_id
+        models.WaitingList.user_id == current_user.id
     ).first()
     
     if not waitlist_entry or waitlist_entry.status != "waiting":
@@ -184,9 +185,9 @@ def cancel_waitlist(waitlist_id: int, user_id: int = 1, db: Session = Depends(ge
     return {"message": "Waitlist cancelled successfully"}
 
 @router.get("/history")
-def get_history(user_id: int = 1, db: Session = Depends(get_db)):
+def get_history(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     bookings = db.query(models.Booking).filter(
-        models.Booking.user_id == user_id, 
+        models.Booking.user_id == current_user.id, 
         models.Booking.is_expired == False
     ).all()
     
@@ -226,9 +227,9 @@ def get_history(user_id: int = 1, db: Session = Depends(get_db)):
     return res
 
 @router.get("/user_waitlists")
-def get_user_waitlists(user_id: int = 1, db: Session = Depends(get_db)):
+def get_user_waitlists(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     waitlists = db.query(models.WaitingList).filter(
-        models.WaitingList.user_id == user_id,
+        models.WaitingList.user_id == current_user.id,
         models.WaitingList.is_expired == False
     ).all()
     

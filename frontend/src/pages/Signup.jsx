@@ -11,9 +11,12 @@ function Signup() {
       name: '', email: '', username: '', password: '', gender: 'Male'
   });
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleSignup = async (e) => {
     e.preventDefault();
+    setIsLoading(true);
+    setError('');
     try {
       const res = await api.post('/auth/register', formData);
       // Auto login after signup by automatically calling the login endpoint
@@ -23,6 +26,8 @@ function Signup() {
       navigate(redirect);
     } catch (err) {
       setError(err.response?.data?.detail || "Registration failed");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -70,8 +75,8 @@ function Signup() {
                 </div>
             </div>
             
-            <button type="submit" className="w-full bg-gradient-to-r from-lavender-dark to-lavender text-black font-bold py-4 rounded-xl hover:shadow-[0_0_20px_rgba(150,123,182,0.6)] transition-all mt-4">
-                Register
+            <button type="submit" disabled={isLoading} className={`w-full bg-gradient-to-r from-lavender-dark to-lavender text-black font-bold py-4 rounded-xl transition-all mt-4 ${isLoading ? 'opacity-70 cursor-not-allowed' : 'hover:shadow-[0_0_20px_rgba(150,123,182,0.6)]'}`}>
+                {isLoading ? 'Connecting to server...' : 'Register'}
             </button>
         </form>
         
