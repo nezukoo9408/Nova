@@ -5,6 +5,7 @@ from database import get_db
 import models, schemas
 from redis_store import client as redis_client
 import json
+from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/api/buses", tags=["buses"])
 
@@ -15,7 +16,26 @@ def get_buses(date: Optional[str] = None, route_from: Optional[str] = None, rout
         query = query.filter(models.Bus.route_from.ilike(f"%{route_from}%"))
     if route_to:
         query = query.filter(models.Bus.route_to.ilike(f"%{route_to}%"))
-    return query.all()
+    buses = query.all()
+    if date:
+        valid_buses = []
+        now = datetime.now()
+        for bus in buses:
+            is_closed = False
+            if bus.departure_time:
+                try:
+                    time_obj = bus.departure_time.time()
+                    travel_date_obj = datetime.strptime(date, "%Y-%m-%d").date()
+                    travel_dt = datetime.combine(travel_date_obj, time_obj)
+                    if now >= travel_dt - timedelta(minutes=15):
+                        is_closed = True
+                except Exception:
+                    pass
+            if not is_closed:
+                valid_buses.append(bus)
+        return valid_buses
+        
+    return buses
 
 @router.post("/", response_model=schemas.BusResponse)
 def create_bus(bus: schemas.BusBase, db: Session = Depends(get_db)):
@@ -27,6 +47,20 @@ def create_bus(bus: schemas.BusBase, db: Session = Depends(get_db)):
 
 @router.get("/{bus_id}/seats")
 def get_bus_seats(bus_id: int, date: str, db: Session = Depends(get_db)):
+    bus = db.query(models.Bus).filter(models.Bus.id == bus_id).first()
+    is_booking_closed = False
+    
+    if bus and bus.departure_time:
+        try:
+            now = datetime.now()
+            time_obj = bus.departure_time.time()
+            travel_date_obj = datetime.strptime(date, "%Y-%m-%d").date()
+            travel_dt = datetime.combine(travel_date_obj, time_obj)
+            if now >= travel_dt - timedelta(minutes=15):
+                is_booking_closed = True
+        except Exception:
+            pass
+            
     # Get all locked seats from redis
     keys = redis_client.keys(f"locked_seat:{bus_id}:{date}:*")
     locked_seats = []
@@ -57,5 +91,6 @@ def get_bus_seats(bus_id: int, date: str, db: Session = Depends(get_db)):
         "date": date,
         "locked": locked_seats,
         "booked": booked_details,
-        "waiting": waiting_count
+        "waiting": waiting_count,
+        "is_booking_closed": is_booking_closed
     }

@@ -1,15 +1,32 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from database import get_db
 import models, schemas
+import email_utils
 from redis_store import client as redis_client
 from datetime import datetime, timedelta
 from auth import get_current_user
 
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 
+def is_booking_allowed(bus_id: int, travel_date: str, db: Session) -> bool:
+    bus = db.query(models.Bus).filter(models.Bus.id == bus_id).first()
+    if not bus or not bus.departure_time:
+        return True
+    try:
+        now = datetime.now()
+        travel_dt = datetime.combine(datetime.strptime(travel_date, "%Y-%m-%d").date(), bus.departure_time.time())
+        if now >= travel_dt - timedelta(minutes=15):
+            return False
+    except Exception:
+        pass
+    return True
+
 @router.post("/lock")
 def lock_seat(req: schemas.SeatLockRequest, db: Session = Depends(get_db)):
+    if not is_booking_allowed(req.bus_id, req.travel_date, db):
+        raise HTTPException(status_code=400, detail="Booking closed for this bus")
+        
     key = f"locked_seat:{req.bus_id}:{req.travel_date}:{req.seat_id}"
     
     # Check if already booked
@@ -23,20 +40,24 @@ def lock_seat(req: schemas.SeatLockRequest, db: Session = Depends(get_db)):
     if is_booked:
         raise HTTPException(status_code=400, detail="Seat is already booked permanently.")
     
-    # Check if locked by someone else
-    locked_by = redis_client.get(key)
-    if locked_by:
-        raise HTTPException(status_code=400, detail="Seat is currently locked by another user.")
+    # Check if locked by someone else — skip in simulation (overwrite stale locks)
+    # redis_client.get(key) check removed: a fresh selection always wins the 5-min hold
         
     # Lock for 5 minutes (300 seconds)
-    # Using a dummy user_id for lock since we haven't strictly depend on auth user ID here, 
-    # but in real app we would use current_user.id
     redis_client.setex(key, 300, "locked_temporarily")
     return {"message": "Seat locked successfully for 5 minutes."}
 
+@router.get("/check-first-offer")
+def check_first_offer(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Returns whether the current user is eligible for the FIRST200 first-booking offer."""
+    eligible = not current_user.has_used_first_offer
+    return {"eligible": eligible, "discount": 200, "code": "FIRST200"}
+
 @router.post("/confirm")
-def confirm_booking(req: schemas.BookingRequest, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # In real app, user_id comes from Depends(get_current_user)
+def confirm_booking(req: schemas.BookingRequest, background_tasks: BackgroundTasks, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not is_booking_allowed(req.bus_id, req.travel_date, db):
+        raise HTTPException(status_code=400, detail="Booking closed for this bus")
+        
     key = f"locked_seat:{req.bus_id}:{req.travel_date}:{req.seat_id}"
     
     # Check if booked
@@ -49,8 +70,13 @@ def confirm_booking(req: schemas.BookingRequest, current_user: models.User = Dep
     
     if is_booked:
         raise HTTPException(status_code=400, detail="Seat already booked.")
+
+    # Validate FIRST200 coupon on backend
+    if req.applied_coupon == "FIRST200":
+        if current_user.has_used_first_offer:
+            raise HTTPException(status_code=400, detail="First booking offer has already been used.")
         
-    # Create booking
+    # Create booking with the discounted amount passed from frontend
     booking = models.Booking(
         user_id=current_user.id,
         bus_id=req.bus_id,
@@ -65,19 +91,57 @@ def confirm_booking(req: schemas.BookingRequest, current_user: models.User = Dep
     db.commit()
     db.refresh(booking)
     
+    # Mark first offer as used if FIRST200 was applied
+    if req.applied_coupon == "FIRST200" and not current_user.has_used_first_offer:
+        current_user.has_used_first_offer = True
+        db.commit()
+    
     # Remove lock
     redis_client.delete(key)
+    
+    # Send booking confirmation email
+    bus = db.query(models.Bus).filter(models.Bus.id == req.bus_id).first()
+    if bus:
+        dt = f"{req.travel_date} {bus.departure_time.strftime('%I:%M %p') if bus.departure_time else ''}"
+        bus_type = f"{'AC' if bus.is_ac else 'Non-AC'} / {'Sleeper' if bus.is_sleeper else 'Seater'}"
+        html_body = email_utils.template_booking_confirmation(
+            name=current_user.name,
+            email=current_user.email,
+            route_from=bus.route_from,
+            route_to=bus.route_to,
+            date=dt.strip(),
+            seat=req.seat_id,
+            bus_type=bus_type,
+            amount=req.amount,
+            booking_id=booking.id
+        )
+        background_tasks.add_task(email_utils.send_email, current_user.email, "Nova Booking Confirmation 🎟️", html_body)
     
     return {"message": "Booking confirmed successfully", "booking_id": booking.id}
 
 @router.post("/{booking_id}/cancel")
-def cancel_booking(booking_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def cancel_booking(booking_id: int, background_tasks: BackgroundTasks, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     booking = db.query(models.Booking).filter(models.Booking.id == booking_id, models.Booking.user_id == current_user.id).first()
     if not booking or booking.status != "booked":
         raise HTTPException(status_code=400, detail="Invalid booking")
         
     booking.status = "cancelled"
     db.commit()
+    
+    # Send cancellation email for the user
+    bus = db.query(models.Bus).filter(models.Bus.id == booking.bus_id).first()
+    if bus:
+        dt = f"{booking.travel_date} {bus.departure_time.strftime('%I:%M %p') if bus.departure_time else ''}"
+        html_body = email_utils.template_cancellation(
+            name=current_user.name,
+            route_from=bus.route_from,
+            route_to=bus.route_to,
+            date=dt.strip(),
+            seat=booking.seat_id,
+            is_waitlist=False,
+            tracking_id=booking.id
+        )
+        background_tasks.add_task(email_utils.send_email, current_user.email, "Nova Ticket Cancellation ❌", html_body)
     
     # Auto-assign from waitlist
     waitlist_user = db.query(models.WaitingList).filter(
@@ -124,10 +188,41 @@ def cancel_booking(booking_id: int, current_user: models.User = Depends(get_curr
             u.position -= 1
         db.commit()
         
+        # Send Waitlist -> Confirmed email
+        actual_wl_user = db.query(models.User).filter(models.User.id == waitlist_user.user_id).first()
+        if actual_wl_user and bus:
+            wl_dt = f"{booking.travel_date} {bus.departure_time.strftime('%I:%M %p') if bus.departure_time else ''}"
+            wl_bus_type = f"{'AC' if bus.is_ac else 'Non-AC'} / {'Sleeper' if bus.is_sleeper else 'Seater'}"
+            wl_html_body = email_utils.template_waitlist_confirmed(
+                name=actual_wl_user.name,
+                route_from=bus.route_from,
+                route_to=bus.route_to,
+                date=wl_dt.strip(),
+                seat=booking.seat_id,
+                bus_type=wl_bus_type
+            )
+            background_tasks.add_task(email_utils.send_email, actual_wl_user.email, "Nova Seat Confirmed 🎉", wl_html_body)
+        
     return {"message": "Booking cancelled", "auto_assigned": assigned_to_waitlist}
 
+@router.get("/verify_waitlist_status")
+def verify_waitlist_status(bus_id: int, date: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not is_booking_allowed(bus_id, date, db):
+        raise HTTPException(status_code=400, detail="Booking closed for this bus")
+        
+    existing = db.query(models.WaitingList).filter(
+        models.WaitingList.bus_id == bus_id,
+        models.WaitingList.travel_date == date,
+        models.WaitingList.user_id == current_user.id,
+        models.WaitingList.status == "waiting"
+    ).first()
+    return {"already_in_waitlist": existing is not None}
+
 @router.post("/waitlist")
-def join_waitlist(req: schemas.BookingRequest, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def join_waitlist(req: schemas.BookingRequest, background_tasks: BackgroundTasks, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not is_booking_allowed(req.bus_id, req.travel_date, db):
+        raise HTTPException(status_code=400, detail="Booking closed for this bus")
+        
     existing = db.query(models.WaitingList).filter(
         models.WaitingList.bus_id == req.bus_id,
         models.WaitingList.travel_date == req.travel_date,
@@ -158,10 +253,25 @@ def join_waitlist(req: schemas.BookingRequest, current_user: models.User = Depen
     db.add(wl_entry)
     db.commit()
     db.refresh(wl_entry)
+    
+    # Send Waitlist confirmation email
+    bus = db.query(models.Bus).filter(models.Bus.id == req.bus_id).first()
+    if bus:
+        dt = f"{req.travel_date} {bus.departure_time.strftime('%I:%M %p') if bus.departure_time else ''}"
+        html_body = email_utils.template_waiting_list(
+            name=current_user.name,
+            route_from=bus.route_from,
+            route_to=bus.route_to,
+            date=dt.strip(),
+            position=wl_entry.position,
+            amount=req.amount
+        )
+        background_tasks.add_task(email_utils.send_email, current_user.email, "Nova Waitlist Confirmation ⏳", html_body)
+
     return {"message": "Joined waitlist successfully", "waiting_id": wl_entry.id}
 
 @router.post("/waitlist/{waitlist_id}/cancel")
-def cancel_waitlist(waitlist_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def cancel_waitlist(waitlist_id: int, background_tasks: BackgroundTasks, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     waitlist_entry = db.query(models.WaitingList).filter(
         models.WaitingList.id == waitlist_id,
         models.WaitingList.user_id == current_user.id
@@ -182,6 +292,22 @@ def cancel_waitlist(waitlist_id: int, current_user: models.User = Depends(get_cu
     for u in other_users:
         u.position -= 1
     db.commit()
+    
+    # Send Cancellation Email
+    bus = db.query(models.Bus).filter(models.Bus.id == waitlist_entry.bus_id).first()
+    if bus:
+        dt = f"{waitlist_entry.travel_date} {bus.departure_time.strftime('%I:%M %p') if bus.departure_time else ''}"
+        html_body = email_utils.template_cancellation(
+            name=current_user.name,
+            route_from=bus.route_from,
+            route_to=bus.route_to,
+            date=dt.strip(),
+            seat="",
+            is_waitlist=True,
+            tracking_id=waitlist_entry.id
+        )
+        background_tasks.add_task(email_utils.send_email, current_user.email, "Nova Ticket Cancellation ❌", html_body)
+
     return {"message": "Waitlist cancelled successfully"}
 
 @router.get("/history")
@@ -201,15 +327,17 @@ def get_history(current_user: models.User = Depends(get_current_user), db: Sessi
         # Expiry Check
         if bus and bus.departure_time:
             try:
-                time_str = bus.departure_time.strftime('%H:%M:%S')
-                dt_str = f"{b.travel_date} {time_str}"
-                travel_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+                time_obj = bus.departure_time.time()
+                travel_date_obj = datetime.strptime(b.travel_date, "%Y-%m-%d").date()
+                travel_dt = datetime.combine(travel_date_obj, time_obj)
+                
                 # Expire after departure + 30 minutes
-                if now >= travel_dt + timedelta(minutes=30):
+                if datetime.now() >= travel_dt + timedelta(minutes=30):
                     b.is_expired = True
                     modified = True
                     continue
-            except Exception:
+            except Exception as e:
+                print(f"Error parsing booking travel_date {b.travel_date} for expiry: {e}")
                 pass
                 
         res.append({
@@ -243,22 +371,23 @@ def get_user_waitlists(current_user: models.User = Depends(get_current_user), db
         # Expiry Check and Auto-Refund
         if bus and bus.departure_time:
             try:
-                time_str = bus.departure_time.strftime('%H:%M:%S')
-                dt_str = f"{wl.travel_date} {time_str}"
-                travel_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+                time_obj = bus.departure_time.time()
+                travel_date_obj = datetime.strptime(wl.travel_date, "%Y-%m-%d").date()
+                travel_dt = datetime.combine(travel_date_obj, time_obj)
                 
                 # Check absolute expiry (+30m after departure)
-                if now >= travel_dt + timedelta(minutes=30):
+                if datetime.now() >= travel_dt + timedelta(minutes=30):
                     wl.is_expired = True
                     modified = True
                     continue # Skip returning this entry
                 
                 # Check pre-departure waitlist auto-refund (-30m before departure)
-                if wl.status == "waiting" and now >= travel_dt - timedelta(minutes=30):
+                if wl.status == "waiting" and datetime.now() >= travel_dt - timedelta(minutes=30):
                     wl.status = "refunded"
                     modified = True
                     
-            except Exception:
+            except Exception as e:
+                print(f"Error parsing waitlist travel_date {wl.travel_date} for expiry: {e}")
                 pass
                 
         res.append({

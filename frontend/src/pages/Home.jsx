@@ -1,15 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
-import { Compass, Search } from 'lucide-react';
+import { Compass, Search, MapPin, Tag, Star, Calendar, Moon, GraduationCap } from 'lucide-react';
 
 const featuredRoutes = [
-  { id: 1, from: 'Bengaluru', to: 'Mysuru', image: 'https://picsum.photos/id/10/800/600', desc: 'Heritage Highway' },
-  { id: 2, from: 'Bengaluru', to: 'Mangaluru', image: 'https://picsum.photos/id/13/800/600', desc: 'Coastal Express' },
-  { id: 3, from: 'Bengaluru', to: 'Hubballi', image: 'https://picsum.photos/id/29/800/600', desc: 'Commercial Route' },
-  { id: 4, from: 'Bengaluru', to: 'Belagavi', image: 'https://picsum.photos/id/49/800/600', desc: 'Long Highway' },
-  { id: 5, from: 'Bengaluru', to: 'Shivamogga', image: 'https://picsum.photos/id/28/800/600', desc: 'Forest Drive' },
-  { id: 6, from: 'Mysuru', to: 'Mangaluru', image: 'https://picsum.photos/id/36/800/600', desc: 'Western Ghats' },
+  { id: 1, from: 'Bengaluru', to: 'Mysuru', desc: 'Heritage Highway' },
+  { id: 2, from: 'Bengaluru', to: 'Mangaluru', desc: 'Coastal Express' },
+  { id: 3, from: 'Bengaluru', to: 'Hubballi', desc: 'Commercial Route' },
+  { id: 4, from: 'Bengaluru', to: 'Belagavi', desc: 'Long Highway' },
+  { id: 5, from: 'Bengaluru', to: 'Shivamogga', desc: 'Forest Drive' },
+  { id: 6, from: 'Mysuru', to: 'Mangaluru', desc: 'Western Ghats' },
+];
+
+const offers = [
+  { id: 1, title: 'First Ride Offer', desc: 'Get ₹200 OFF on your first booking.', code: 'FIRST200', icon: <Star className="w-7 h-7 text-yellow-400" /> },
+  { id: 2, title: 'Weekend Special', desc: 'Get ₹150 OFF on weekend bookings.', code: 'WEEKEND150', icon: <Calendar className="w-7 h-7 text-orange-400" /> },
+  { id: 3, title: 'Night Saver', desc: 'Get ₹100 OFF on overnight buses.', code: 'NIGHT100', icon: <Moon className="w-7 h-7 text-blue-400" /> },
+  { id: 4, title: 'Student Discount', desc: 'Flat ₹120 OFF for students.', code: 'STUDENT120', icon: <GraduationCap className="w-7 h-7 text-green-400" /> },
 ];
 
 function Home() {
@@ -43,7 +50,7 @@ function Home() {
       </motion.div>
 
       {/* Featured Routes */}
-      <div className="pb-10">
+      <div className="pb-10 relative z-10">
           <div className="flex justify-between items-end mb-6">
               <h2 className="text-2xl font-bold text-lavender-light flex items-center gap-2">
                   <Compass className="text-lavender w-6 h-6" />
@@ -59,14 +66,57 @@ function Home() {
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.1 }}
-                      className="group cursor-pointer relative h-72 rounded-3xl overflow-hidden shadow-lg border border-lavender/10 hover:border-lavender/50 hover:shadow-[0_0_30px_rgba(150,123,182,0.3)] transition-all"
+                      className="group cursor-pointer relative h-48 rounded-3xl overflow-hidden shadow-lg border border-lavender/20 bg-gradient-to-br from-[#12121e] to-[#0a0a0f] hover:border-lavender/60 hover:shadow-[0_0_30px_rgba(150,123,182,0.3)] transition-all flex flex-col justify-between p-6"
                   >
-                      <img src={route.image} alt={route.to} className="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent opacity-90 group-hover:opacity-100 transition-opacity"></div>
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-lavender/10 rounded-full blur-2xl -translate-y-10 translate-x-10 group-hover:bg-lavender/20 transition-all duration-500"></div>
                       
-                      <div className="absolute inset-0 p-6 flex flex-col justify-end z-10">
-                          <span className="text-xs font-bold text-lavender tracking-widest uppercase mb-1 drop-shadow-md">{route.desc}</span>
-                          <h3 className="text-2xl font-extrabold text-white drop-shadow-md">{route.from} → {route.to}</h3>
+                      <div className="flex justify-between items-start relative z-10">
+                          <MapPin className="text-lavender w-8 h-8 opacity-80 group-hover:scale-110 transition-transform" />
+                          <span className="text-xs font-bold text-white/50 tracking-widest uppercase bg-white/5 px-3 py-1 rounded-full border border-white/10">{route.desc}</span>
+                      </div>
+                      
+                      <div className="relative z-10">
+                          <h3 className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-400 group-hover:from-lavender group-hover:to-white transition-all">{route.from}</h3>
+                          <div className="flex items-center gap-2 mt-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-lavender/50"></span>
+                              <span className="h-px bg-lavender/20 w-8"></span>
+                              <span className="w-1.5 h-1.5 rounded-full bg-lavender/50"></span>
+                          </div>
+                          <h3 className="text-xl font-bold text-gray-400 mt-1">{route.to}</h3>
+                      </div>
+                  </motion.div>
+              ))}
+          </div>
+      </div>
+
+      {/* Offers Section */}
+      <div className="pb-16 relative z-10">
+          <div className="flex justify-between items-end mb-6">
+              <h2 className="text-2xl font-bold text-lavender-light flex items-center gap-2">
+                  <Tag className="text-lavender w-6 h-6" />
+                  Exclusive Offers
+              </h2>
+          </div>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {offers.map((offer, i) => (
+                  <motion.div 
+                      key={offer.id}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: i * 0.1 }}
+                      className="bg-[#121212]/70 backdrop-blur-md border border-white/10 hover:border-lavender/40 rounded-3xl p-5 hover:bg-[#1a1a2e]/50 transition-all flex flex-col justify-between h-full group shadow-md hover:shadow-[0_0_20px_rgba(150,123,182,0.15)]"
+                  >
+                      <div>
+                          <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                              {offer.icon}
+                          </div>
+                          <h3 className="text-lg font-bold text-white mb-2">{offer.title}</h3>
+                          <p className="text-gray-400 text-sm leading-relaxed mb-4">{offer.desc}</p>
+                      </div>
+                      <div className="bg-black/60 border border-lavender/20 border-dashed rounded-xl p-3 flex justify-between items-center group-hover:border-lavender/60 transition-colors">
+                          <span className="text-xs text-gray-500 font-bold uppercase tracking-wider">CODE</span>
+                          <span className="text-sm text-lavender font-mono font-bold tracking-widest">{offer.code}</span>
                       </div>
                   </motion.div>
               ))}

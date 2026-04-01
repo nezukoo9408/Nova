@@ -6,11 +6,13 @@ import BookingCard from '../components/BookingCard';
 
 function Waitlist() {
   const [waitlist, setWaitlist] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/bookings/user_waitlists').then(res => {
-        setWaitlist(res.data);
-    }).catch(console.error);
+    api.get('/bookings/user_waitlists')
+       .then(res => setWaitlist(res.data))
+       .catch(console.error)
+       .finally(() => setLoading(false));
   }, []);
 
   const cancelWaitlist = async (id) => {
@@ -18,6 +20,7 @@ function Waitlist() {
     try {
         await api.post(`/bookings/waitlist/${id}/cancel`);
         setWaitlist(waitlist.map(w => w.id === id ? { ...w, status: 'refunded' } : w));
+        alert("Waitlist request cancelled successfully. A confirmation email has been sent.");
     } catch (err) {
         alert(err.response?.data?.detail || "Failed to cancel waitlist");
     }
@@ -36,10 +39,15 @@ function Waitlist() {
       </div>
 
       <div className="flex flex-col gap-4 max-w-3xl w-full relative z-10">
-          {waitlist.length === 0 ? (
+          {loading ? (
+              <div className="flex flex-col items-center justify-center p-12 text-center w-full h-full">
+                  <div className="w-16 h-16 border-4 border-yellow-500/20 border-t-yellow-400 rounded-full animate-spin mb-4"></div>
+                  <p className="text-gray-400 font-bold text-lg animate-pulse">Loading Waitlist...</p>
+              </div>
+          ) : waitlist.length === 0 ? (
               <div className="bg-[#1a1a1a]/60 backdrop-blur-md rounded-2xl p-12 text-center border border-lavender/30 flex flex-col items-center">
                   <AlertCircle className="w-12 h-12 text-lavender/40 mb-4" />
-                  <p className="text-xl text-gray-500 font-bold">You have no active waiting list requests.</p>
+                  <p className="text-xl text-gray-400 font-bold">You have no active waiting list requests.</p>
               </div>
           ) : waitlist.map((w, index) => (
               <BookingCard 

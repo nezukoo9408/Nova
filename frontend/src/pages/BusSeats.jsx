@@ -15,17 +15,23 @@ function BusSeats() {
   const [buses, setBuses] = useState([]);
   const [selectedBus, setSelectedBus] = useState(null);
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);
+  const [busesLoading, setBusesLoading] = useState(true);
+  const [isLocking, setIsLocking] = useState(false);
+  const [checkingWaitlist, setCheckingWaitlist] = useState(false);
+  const [isBookingClosed, setIsBookingClosed] = useState(false);
 
   useEffect(() => {
     // Fetch buses matching route
     const from = searchParams.get('from');
     const to = searchParams.get('to');
+    setBusesLoading(true);
     api.get(`/buses?route_from=${from}&route_to=${to}&date=${date}`)
        .then(res => {
            setBuses(res.data);
            if(res.data.length > 0) setSelectedBus(res.data[0]);
        })
-       .catch(err => console.error(err));
+       .catch(err => console.error(err))
+       .finally(() => setBusesLoading(false));
   }, [searchParams, date]);
 
   useEffect(() => {
@@ -39,6 +45,7 @@ function BusSeats() {
     try {
       const res = await api.get(`/buses/${id}/seats?date=${date}`);
       setSeatsData(res.data);
+      setIsBookingClosed(res.data.is_booking_closed || false);
     } catch(err) {
       console.error(err);
     }
@@ -56,6 +63,7 @@ function BusSeats() {
 
   const proceedToPay = async () => {
     if (selectedSeats.length === 0) return alert("Select at least one seat");
+    setIsLocking(true);
     // Lock seats in backend sequentially
     try {
         const bus = selectedBus;
@@ -70,6 +78,9 @@ function BusSeats() {
         // Save to local storage to pass to payment page
         localStorage.setItem('pending_booking', JSON.stringify({
             busId: bus.id,
+            busName: bus.name,
+            routeFrom: bus.route_from,
+            routeTo: bus.route_to,
             date,
             seats: selectedSeats,
             totalAmount: total
@@ -79,7 +90,25 @@ function BusSeats() {
         alert(err.response?.data?.detail || "Error locking seats");
         if(selectedBus) fetchSeats(selectedBus.id);
         setSelectedSeats([]);
+    } finally {
+        setIsLocking(false);
     }
+  };
+
+  const handleJoinWaitlistClick = async () => {
+      setCheckingWaitlist(true);
+      try {
+          const checkRes = await api.get(`/bookings/verify_waitlist_status?bus_id=${selectedBus.id}&date=${date}`);
+          if (checkRes.data.already_in_waitlist) {
+              alert("You are already in the waiting list for this route on the selected date.");
+          } else {
+              setShowWaitlistModal(true);
+          }
+      } catch (err) {
+          alert(err.response?.data?.detail || "Error validating waiting list status.");
+      } finally {
+          setCheckingWaitlist(false);
+      }
   };
 
   const getSeatColor = (seatId) => {
@@ -147,7 +176,16 @@ function BusSeats() {
 
   return (
     <div className="flex flex-col gap-8 pb-32">
-      {!selectedBus ? (
+      {busesLoading ? (
+          <div className="max-w-2xl mx-auto w-full mt-32 flex flex-col items-center gap-6">
+              <div className="relative w-20 h-20">
+                  <div className="absolute inset-0 border-4 border-lavender/20 rounded-full" />
+                  <div className="absolute inset-0 border-4 border-transparent border-t-lavender rounded-full animate-spin" />
+              </div>
+              <p className="text-lavender font-bold text-lg tracking-wide">Searching for buses...</p>
+              <p className="text-gray-500 text-sm">Fetching available routes for your journey</p>
+          </div>
+      ) : !selectedBus ? (
           <div className="max-w-2xl mx-auto w-full mt-20 bg-[#1a1a1a]/80 backdrop-blur-lg border border-lavender/30 rounded-3xl p-12 text-center shadow-2xl">
               <div className="text-6xl mb-6">🚌</div>
               <h2 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-lavender to-white mb-4">
@@ -233,16 +271,25 @@ function BusSeats() {
       
       <div className="max-w-md mx-auto bg-[#1a1a1a] border border-lavender/20 p-4 rounded-2xl flex justify-center gap-6 shadow-lg relative z-10">
           <label className="flex items-center gap-2 cursor-pointer">
-              <input type="radio" name="gender" value="Male" checked={gender==='Male'} onChange={()=>setGender('Male')} /> 
+              <input type="radio" name="gender" value="Male" checked={gender==='Male'} onChange={()=>setGender('Male')} disabled={isBookingClosed} /> 
               <span>Male Passenger</span>
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
-              <input type="radio" name="gender" value="Female" checked={gender==='Female'} onChange={()=>setGender('Female')} /> 
+              <input type="radio" name="gender" value="Female" checked={gender==='Female'} onChange={()=>setGender('Female')} disabled={isBookingClosed} /> 
               <span>Female Passenger</span>
           </label>
       </div>
 
-      {availableCount === 0 ? (
+      {isBookingClosed ? (
+          <div className="bg-[#1a1a1a]/80 border border-red-500/30 w-full max-w-2xl mx-auto rounded-3xl p-10 text-center shadow-[0_0_30px_rgba(239,68,68,0.15)] mb-8">
+              <div className="text-6xl mb-6">🚫</div>
+              <h3 className="text-3xl font-black text-red-400 mb-4">Booking Closed</h3>
+              <p className="text-gray-400 mb-8 font-medium">Booking is completely closed for this bus. We stop accepting new reservations and waiting list entries strictly 15 minutes before departure.</p>
+              <button onClick={() => navigate('/search')} className="bg-red-500/20 text-red-400 border border-red-500/30 px-8 py-3 rounded-xl font-bold hover:bg-red-500/30 transition-all">
+                  Search Another Bus
+              </button>
+          </div>
+      ) : availableCount === 0 ? (
           <div className="bg-[#1a1a1a]/80 border border-yellow-500/30 w-full max-w-2xl mx-auto rounded-3xl p-10 text-center shadow-[0_0_30px_rgba(234,179,8,0.15)] mb-8">
               <h3 className="text-3xl font-black text-white mb-4">All seats are booked</h3>
               
@@ -257,10 +304,11 @@ function BusSeats() {
                   <>
                       <p className="text-gray-400 mb-8">We cannot guarantee a seat, but you can join our waiting list in case a passenger cancels their trip.</p>
                       <button 
-                          onClick={() => setShowWaitlistModal(true)} 
-                          className="px-8 py-4 bg-yellow-500 text-black font-bold text-lg rounded-xl hover:bg-yellow-400 transition-colors shadow-lg"
+                          disabled={checkingWaitlist}
+                          onClick={handleJoinWaitlistClick} 
+                          className="px-8 py-4 bg-yellow-500 text-black font-bold text-lg rounded-xl hover:bg-yellow-400 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                          Join Waiting List
+                          {checkingWaitlist ? "Checking Status..." : "Join Waiting List"}
                       </button>
                   </>
               )}
@@ -273,15 +321,15 @@ function BusSeats() {
       )}
 
       {/* Fixed bottom bar */}
-      {availableCount > 0 && (
+      {!isBookingClosed && availableCount > 0 && (
           <div className="fixed bottom-0 left-0 right-0 bg-[#121212]/90 backdrop-blur-xl border-t border-lavender/30 p-6 flex justify-between items-center z-50">
               <div className="max-w-7xl mx-auto w-full flex justify-between items-center px-6">
                   <div>
                       <p className="text-sm text-gray-400">Selected: {selectedSeats.map(s=>s.id).join(", ") || 'None'}</p>
                       <p className="font-black text-2xl text-lavender-light">Total: ₹{selectedSeats.reduce((sum, s) => sum + (s.id.startsWith('U') ? selectedBus?.base_price_upper : selectedBus?.base_price_lower), 0)}</p>
                   </div>
-                  <button onClick={proceedToPay} className="px-8 py-4 bg-gradient-to-r from-lavender to-purple-600 text-white font-bold rounded-xl hover:shadow-[0_0_20px_rgba(150,123,182,0.6)] transition-all">
-                      Continue to Payment
+                  <button disabled={isLocking} onClick={proceedToPay} className="px-8 py-4 bg-gradient-to-r from-lavender to-purple-600 text-white font-bold rounded-xl hover:shadow-[0_0_20px_rgba(150,123,182,0.6)] transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                      {isLocking ? "Locking Seats..." : "Continue to Payment"}
                   </button>
               </div>
           </div>
@@ -318,7 +366,9 @@ function BusSeats() {
                           };
                           localStorage.setItem('pending_booking', JSON.stringify(payload));
                           navigate('/payment');
-                      }} className="flex-1 py-3 px-4 bg-yellow-500 text-black font-bold rounded-xl hover:bg-yellow-400 transition-colors">Confirm & Pay</button>
+                      }} className="flex-1 py-3 px-4 bg-yellow-500 text-black font-bold rounded-xl hover:bg-yellow-400 transition-colors">
+                          Confirm & Pay
+                      </button>
                   </div>
               </motion.div>
           </div>

@@ -13,6 +13,7 @@ class User(Base):
     name = Column(String(100))
     email = Column(String(100), unique=True, index=True)
     role = Column(String(50), default="user")
+    has_used_first_offer = Column(Boolean, default=False, server_default='0')
     created_at = Column(DateTime(timezone=True), default=func.now())
 
 class Bus(Base):

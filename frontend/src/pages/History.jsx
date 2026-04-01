@@ -6,10 +6,13 @@ import BookingCard from '../components/BookingCard';
 
 function History() {
   const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+
   useEffect(() => {
     api.get('/bookings/history')
        .then(res => setBookings(res.data))
-       .catch(console.error);
+       .catch(console.error)
+       .finally(() => setLoading(false));
   }, []);
 
   const cancelBooking = async (id) => {
@@ -17,6 +20,7 @@ function History() {
     try {
         await api.post(`/bookings/${id}/cancel`);
         setBookings(bookings.map(b => b.id === id ? { ...b, status: 'cancelled' } : b));
+        alert("Ticket cancelled successfully. A confirmation email has been sent to your registered address.");
     } catch (err) {
         alert(err.response?.data?.detail || "Failed to cancel ticket");
     }
@@ -29,8 +33,13 @@ function History() {
         </h1>
 
         <div className="flex flex-col gap-4">
-            {bookings.length === 0 ? (
-                <div className="bg-[#1a1a1a]/70 backdrop-blur-lg border border-lavender/30 rounded-2xl p-10 text-center relative z-10">No bookings found.</div>
+            {loading ? (
+                <div className="flex flex-col items-center justify-center p-12 text-center relative z-10 w-full h-full">
+                    <div className="w-16 h-16 border-4 border-lavender/20 border-t-lavender rounded-full animate-spin mb-4"></div>
+                    <p className="text-gray-400 font-bold text-lg animate-pulse">Loading Bookings...</p>
+                </div>
+            ) : bookings.length === 0 ? (
+                <div className="bg-[#1a1a1a]/70 backdrop-blur-lg border border-lavender/30 rounded-2xl p-10 text-center relative z-10 text-white font-medium">No bookings found.</div>
             ) : (
                 bookings.map(b => (
                     <BookingCard 

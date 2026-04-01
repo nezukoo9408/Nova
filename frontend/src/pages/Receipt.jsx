@@ -71,7 +71,11 @@ function Receipt() {
             <span className="text-4xl font-extrabold text-black">₹{totalAmount}</span>
         </div>
 
-        <div className="mt-10 flex gap-4">
+        <div className="mt-8 bg-green-50 p-4 rounded-xl border border-green-200 text-center">
+            <p className="text-green-800 text-sm font-semibold">✓ A booking confirmation email has been sent to your registered email address.</p>
+        </div>
+
+        <div className="mt-8 flex gap-4">
             <Link to="/history" className="flex-1 py-3 text-center border-2 border-black rounded-lg font-bold hover:bg-black hover:text-white transition-colors">View History</Link>
             <Link to="/" className="flex-1 py-3 text-center bg-lavender text-black rounded-lg font-bold hover:bg-lavender-dark hover:text-white transition-colors">Book Another</Link>
         </div>

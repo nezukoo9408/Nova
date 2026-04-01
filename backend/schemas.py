@@ -49,6 +49,7 @@ class BookingRequest(BaseModel):
     travel_date: str
     gender: str
     amount: float
+    applied_coupon: Optional[str] = None
 
 class WaitlistResponse(BaseModel):
     id: int
