@@ -8,7 +8,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Fallback for local development (optional)
 if not DATABASE_URL:
-    DATABASE_URL = "mysql+pymysql://root:root@127.0.0.1:3306/bus_booking"
+    DATABASE_URL = "mysql+pymysql://root:rehan15@127.0.0.1:3306/bus_booking"
 
 # Create engine
 engine = create_engine(
