@@ -103,7 +103,7 @@ def confirm_booking(req: schemas.BookingRequest, background_tasks: BackgroundTas
     bus = db.query(models.Bus).filter(models.Bus.id == req.bus_id).first()
     if bus:
         dt = f"{req.travel_date} {bus.departure_time.strftime('%I:%M %p') if bus.departure_time else ''}"
-        bus_type = f"{'AC' if bus.is_ac else 'Non-AC'} / {'Sleeper' if bus.is_sleeper else 'Seater'}"
+        bus_type = f"{'AC' if bus.is_ac else 'Non-AC'}"
         html_body = email_utils.template_booking_confirmation(
             name=current_user.name,
             email=current_user.email,
@@ -192,7 +192,7 @@ def cancel_booking(booking_id: int, background_tasks: BackgroundTasks, current_u
         actual_wl_user = db.query(models.User).filter(models.User.id == waitlist_user.user_id).first()
         if actual_wl_user and bus:
             wl_dt = f"{booking.travel_date} {bus.departure_time.strftime('%I:%M %p') if bus.departure_time else ''}"
-            wl_bus_type = f"{'AC' if bus.is_ac else 'Non-AC'} / {'Sleeper' if bus.is_sleeper else 'Seater'}"
+            wl_bus_type = f"{'AC' if bus.is_ac else 'Non-AC'}"
             wl_html_body = email_utils.template_waitlist_confirmed(
                 name=actual_wl_user.name,
                 route_from=bus.route_from,
@@ -230,7 +230,7 @@ def join_waitlist(req: schemas.BookingRequest, background_tasks: BackgroundTasks
         models.WaitingList.status == "waiting"
     ).first()
     if existing:
-        raise HTTPException(status_code=400, detail="You are already in the waiting list.")
+        raise HTTPException(status_code=400, detail="Only one waiting list entry is allowed per person per bus. You cannot book more than one.")
         
     waitlist_count = db.query(models.WaitingList).filter(
         models.WaitingList.bus_id == req.bus_id,
@@ -324,6 +324,28 @@ def get_history(current_user: models.User = Depends(get_current_user), db: Sessi
     for b in bookings:
         bus = db.query(models.Bus).filter(models.Bus.id == b.bus_id).first()
         
+        status = b.status
+        # Handle Lifecycle: ongoing / completed
+        if bus and bus.departure_time and bus.arrival_time and b.status == "booked":
+            try:
+                now = datetime.now()
+                dep_time = bus.departure_time.time()
+                arr_time = bus.arrival_time.time()
+                travel_date_obj = datetime.strptime(b.travel_date, "%Y-%m-%d").date()
+                
+                departure_dt = datetime.combine(travel_date_obj, dep_time)
+                arrival_dt = datetime.combine(travel_date_obj, arr_time)
+                # Handle cases where arrival is the next day
+                if arrival_dt <= departure_dt:
+                    arrival_dt += timedelta(days=1)
+
+                if now >= arrival_dt:
+                    status = "completed"
+                elif now >= departure_dt:
+                    status = "ongoing"
+            except Exception as e:
+                print(f"Lifecycle error for booking {b.id}: {e}")
+
         # Expiry Check
         if bus and bus.departure_time:
             try:
@@ -331,8 +353,10 @@ def get_history(current_user: models.User = Depends(get_current_user), db: Sessi
                 travel_date_obj = datetime.strptime(b.travel_date, "%Y-%m-%d").date()
                 travel_dt = datetime.combine(travel_date_obj, time_obj)
                 
-                # Expire after departure + 30 minutes
-                if datetime.now() >= travel_dt + timedelta(minutes=30):
+                # Expire from history list ONLY if cancelled or old -- keep completed/ongoing for record?
+                # Actually user said "transferred to completed", so we should show them.
+                # If departure was > 24h ago, we can mark as is_expired
+                if now >= travel_dt + timedelta(days=1):
                     b.is_expired = True
                     modified = True
                     continue
@@ -345,7 +369,7 @@ def get_history(current_user: models.User = Depends(get_current_user), db: Sessi
             "route_from": bus.route_from if bus else "N/A",
             "route_to": bus.route_to if bus else "N/A",
             "travel_date": b.travel_date, "gender": b.gender,
-            "status": b.status, "amount": b.amount, "created_at": b.created_at,
+            "status": status, "amount": b.amount, "created_at": b.created_at,
             "departure_time": bus.departure_time.strftime('%I:%M %p') if bus and bus.departure_time else "N/A",
             "arrival_time": bus.arrival_time.strftime('%I:%M %p') if bus and bus.arrival_time else "N/A"
         })
@@ -368,6 +392,27 @@ def get_user_waitlists(current_user: models.User = Depends(get_current_user), db
     for wl in waitlists:
         bus = db.query(models.Bus).filter(models.Bus.id == wl.bus_id).first()
         
+        status = wl.status
+        # Handle Lifecycle: unsuccessful if bus arrived
+        if bus and bus.arrival_time and wl.status == "waiting":
+            try:
+                now = datetime.now()
+                arr_time = bus.arrival_time.time()
+                dep_time = bus.departure_time.time()
+                travel_date_obj = datetime.strptime(wl.travel_date, "%Y-%m-%d").date()
+                arrival_dt = datetime.combine(travel_date_obj, arr_time)
+                departure_dt = datetime.combine(travel_date_obj, dep_time)
+                if arrival_dt <= departure_dt:
+                    arrival_dt += timedelta(days=1)
+
+                if now >= arrival_dt:
+                    status = "unsuccessful"
+                    # Update DB permanently
+                    wl.status = "unsuccessful"
+                    modified = True
+            except Exception as e:
+                print(f"Waitlist Lifecycle error for {wl.id}: {e}")
+
         # Expiry Check and Auto-Refund
         if bus and bus.departure_time:
             try:
@@ -375,8 +420,8 @@ def get_user_waitlists(current_user: models.User = Depends(get_current_user), db
                 travel_date_obj = datetime.strptime(wl.travel_date, "%Y-%m-%d").date()
                 travel_dt = datetime.combine(travel_date_obj, time_obj)
                 
-                # Check absolute expiry (+30m after departure)
-                if datetime.now() >= travel_dt + timedelta(minutes=30):
+                # Check absolute expiry (+24h after departure)
+                if datetime.now() >= travel_dt + timedelta(days=1):
                     wl.is_expired = True
                     modified = True
                     continue # Skip returning this entry
@@ -385,6 +430,7 @@ def get_user_waitlists(current_user: models.User = Depends(get_current_user), db
                 if wl.status == "waiting" and datetime.now() >= travel_dt - timedelta(minutes=30):
                     wl.status = "refunded"
                     modified = True
+                    status = "refunded"
                     
             except Exception as e:
                 print(f"Error parsing waitlist travel_date {wl.travel_date} for expiry: {e}")
@@ -394,7 +440,7 @@ def get_user_waitlists(current_user: models.User = Depends(get_current_user), db
             "id": wl.id, "bus_id": wl.bus_id, "position": wl.position,
             "route_from": bus.route_from if bus else "N/A",
             "route_to": bus.route_to if bus else "N/A",
-            "status": wl.status, "travel_date": wl.travel_date, "gender": wl.gender,
+            "status": status, "travel_date": wl.travel_date, "gender": wl.gender,
             "amount_paid": wl.amount_paid, "created_at": wl.created_at,
             "departure_time": bus.departure_time.strftime('%I:%M %p') if bus and bus.departure_time else "N/A",
             "arrival_time": bus.arrival_time.strftime('%I:%M %p') if bus and bus.arrival_time else "N/A"
