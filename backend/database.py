@@ -3,7 +3,14 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 import os
 
-# Get DATABASE_URL from environment (Render)
+# Load .env file for local development
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Get DATABASE_URL from environment (Railway/Render/Production)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Fallback for local development (optional)
